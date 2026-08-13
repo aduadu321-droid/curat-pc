@@ -124,17 +124,22 @@ if ($startupScripts.Count -gt 0) {
 }
 
 $winlogon = Get-ItemProperty 'HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon'
-if ($winlogon.Shell -ne 'explorer.exe') {
+if (-not $winlogon) {
+    Add-Finding 'Persistence' 'INFO' 'Could not read Winlogon key - skipping Shell/Userinit checks' `
+        'Nu am putut citi cheia Winlogon - sar peste verificarile Shell/Userinit'
+} elseif ($winlogon.Shell -ne 'explorer.exe') {
     Add-Finding 'Persistence' 'CRIT' ("Winlogon Shell hijacked: '{0}' (should be explorer.exe)" -f $winlogon.Shell) `
         ("Winlogon Shell modificat: '{0}' (ar trebui sa fie explorer.exe)" -f $winlogon.Shell) $winlogon.Shell
 } else {
     Add-Finding 'Persistence' 'OK' 'Winlogon Shell is the stock value (explorer.exe)' 'Winlogon Shell are valoarea standard'
 }
-if ($winlogon.Userinit -notmatch '^C:\\Windows\\system32\\userinit\.exe,?\s*$') {
-    Add-Finding 'Persistence' 'CRIT' ("Winlogon Userinit modified: '{0}'" -f $winlogon.Userinit) `
-        ("Winlogon Userinit modificat: '{0}'" -f $winlogon.Userinit) $winlogon.Userinit
-} else {
-    Add-Finding 'Persistence' 'OK' 'Winlogon Userinit is the stock value' 'Winlogon Userinit are valoarea standard'
+if ($winlogon) {
+    if ($winlogon.Userinit -notmatch '^C:\\Windows\\system32\\userinit\.exe,?\s*$') {
+        Add-Finding 'Persistence' 'CRIT' ("Winlogon Userinit modified: '{0}'" -f $winlogon.Userinit) `
+            ("Winlogon Userinit modificat: '{0}'" -f $winlogon.Userinit) $winlogon.Userinit
+    } else {
+        Add-Finding 'Persistence' 'OK' 'Winlogon Userinit is the stock value' 'Winlogon Userinit are valoarea standard'
+    }
 }
 
 $appinit = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Windows').AppInit_DLLs

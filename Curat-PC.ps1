@@ -513,7 +513,10 @@ if ($machinePolicy -match '^(Bypass|Unrestricted)$') {
 # =====================================================================
 Write-Section 'BUNDLEWARE / PROGRAME AGRESIVE'
 
-$pupPattern = 'driver\s*(updater|booster|support)|pc\s*(cleaner|optimizer|speedup|tuneup|booster)|registry\s*(clean|fix)|system\s*mechanic|optimizer\s*pro|web\s*companion|search\s*protect|shopping\s*helper'
+# Two families: aggressive optimizers/updaters, and rogue "antivirus"/scareware
+# products widely flagged as PUPs. Real AVs (Defender, Bitdefender, ESET,
+# Kaspersky, Avast...) intentionally NOT matched.
+$pupPattern = 'driver\s*(updater|booster|support|restore)|pc\s*(cleaner|optimizer|speedup|tuneup|booster|accelerate)|registry\s*(clean|fix)|system\s*mechanic|optimizer\s*pro|web\s*companion|search\s*protect|shopping\s*helper|segurazo|santivirus|bytefence|reimage\s*repair|restoro|spyhunter|onesafe|advanced\s*identity\s*protector|mycleanpc|slimcleaner|outbyte'
 $pups = @()
 foreach ($app in (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
     if ($app.DisplayName -and $app.DisplayName -match $pupPattern) {

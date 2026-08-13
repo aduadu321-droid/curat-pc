@@ -50,7 +50,7 @@ Works on Windows 10 and 11 with built-in PowerShell 5.1. No dependencies, no int
 | **Access** | Guest account, admins, UAC disabled, RDP/WinRM, failed & remote logons (7 days), cleared logs |
 | **Network** | WinHTTP/browser proxy hijack, PAC URL, hosts file, firewall, DNS servers, SMBv1 |
 | **Code trust** | Authenticode signatures of all running processes and kernel drivers, machine-wide execution policy |
-| **Bundleware** | Aggressive "driver updater / PC optimizer" apps that show fake scary alerts |
+| **Bundleware** | Aggressive "driver updater / PC optimizer" apps and rogue "antivirus" products (Segurazo, ByteFence, Restoro, SpyHunter…) that show fake scary alerts |
 | **Broken downloads** | Detects truncated .exe files that "won't run" (the #1 fake virus symptom) |
 
 ## What `-Fix` does (and never does) / Ce face `-Fix` (și ce nu face niciodată)

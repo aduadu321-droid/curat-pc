@@ -12,6 +12,7 @@
 #    .\Curat-PC.ps1 -Fix       + safe cleanup actions / + curatare sigura
 #    .\Curat-PC.ps1 -Deep      + slow integrity checks (DISM, SFC, Defender)
 #    .\Curat-PC.ps1 -NoReport  no HTML report / fara raport HTML
+#    .\Curat-PC.ps1 -Json      also save findings as JSON / salveaza si JSON
 #
 #  Windows PowerShell 5.1 compatible. No dependencies.
 # =====================================================================
@@ -19,7 +20,8 @@
 param(
     [switch]$Fix,
     [switch]$Deep,
-    [switch]$NoReport
+    [switch]$NoReport,
+    [switch]$Json
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -69,6 +71,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     if ($Fix)      { $argLine += ' -Fix' }
     if ($Deep)     { $argLine += ' -Deep' }
     if ($NoReport) { $argLine += ' -NoReport' }
+    if ($Json)     { $argLine += ' -Json' }
     Start-Process -FilePath 'powershell.exe' -ArgumentList $argLine -Verb RunAs
     exit
 }
@@ -100,9 +103,25 @@ foreach ($k in $runKeys) {
         }
     }
 }
+$startupScripts = @()
+foreach ($d in @([Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup'))) {
+    if ($d -and (Test-Path $d)) {
+        foreach ($f in (Get-ChildItem $d -File -Force | Where-Object { $_.Name -ne 'desktop.ini' })) {
+            $autostarts += ("{0} :: {1}" -f $d, $f.Name)
+            if ($f.Extension -match '^\.(vbs|vbe|js|jse|wsf|wsh|bat|cmd|ps1|hta|scr)$') {
+                $startupScripts += $f.FullName
+            }
+        }
+    }
+}
 Add-Finding 'Persistence' 'INFO' ("{0} autostart entries found (review list in report)" -f $autostarts.Count) `
     ("{0} intrari de pornire automata gasite (vezi lista in raport)" -f $autostarts.Count) `
     ($autostarts -join "`n")
+if ($startupScripts.Count -gt 0) {
+    Add-Finding 'Persistence' 'WARN' ("Script file(s) in Startup folder (common malware trick, legit apps use .lnk/.exe): {0}" -f ($startupScripts -join '; ')) `
+        'Fisiere script in folderul Startup (truc frecvent de malware; aplicatiile legitime folosesc .lnk/.exe) - verifica-le' `
+        ($startupScripts -join "`n")
+}
 
 $winlogon = Get-ItemProperty 'HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon'
 if ($winlogon.Shell -ne 'explorer.exe') {
@@ -165,6 +184,24 @@ foreach ($t in (Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and 
 }
 Add-Finding 'Persistence' 'INFO' ("{0} non-Microsoft scheduled tasks (list in report)" -f $tasks3p.Count) `
     ("{0} sarcini programate non-Microsoft (lista in raport)" -f $tasks3p.Count) ($tasks3p -join "`n")
+
+$unquoted = @()
+foreach ($svc in (Get-CimInstance Win32_Service | Where-Object { $_.PathName })) {
+    $pn = $svc.PathName
+    if ($pn -notmatch '^"' -and $pn -match '^([^"]+?\.exe)') {
+        $exePath = $Matches[1]
+        if ($exePath -match '\s' -and $exePath -notlike "$env:SystemRoot\*") {
+            $unquoted += ("{0} -> {1}" -f $svc.Name, $pn)
+        }
+    }
+}
+if ($unquoted.Count -gt 0) {
+    Add-Finding 'Persistence' 'WARN' ("Service(s) with unquoted path containing spaces (privilege-escalation risk): {0}" -f ($unquoted -join '; ')) `
+        'Servicii cu cale fara ghilimele care contine spatii (risc de escaladare de privilegii) - de obicei software prost scris, nu malware' `
+        ($unquoted -join "`n")
+} else {
+    Add-Finding 'Persistence' 'OK' 'No services with unquoted spaced paths' 'Niciun serviciu cu cale fara ghilimele cu spatii'
+}
 
 # =====================================================================
 #  CHECK 2 - DEFENDER TAMPERING
@@ -253,7 +290,14 @@ if ($encFiles.Count -gt 0) {
 # =====================================================================
 Write-Section 'CRYPTOMINER'
 
-$cpuLoad = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+# Average over 3 samples ~4s apart - a single snapshot misses miners that
+# throttle, and overreacts to momentary spikes
+$cpuSamples = @()
+for ($i = 0; $i -lt 3; $i++) {
+    $cpuSamples += (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+    if ($i -lt 2) { Start-Sleep -Seconds 2 }
+}
+$cpuLoad = [math]::Round(($cpuSamples | Measure-Object -Average).Average, 0)
 if ($cpuLoad -ge 70) {
     $top = (Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 | ForEach-Object { "$($_.ProcessName) ($([math]::Round($_.CPU,0))s)" }) -join ', '
     Add-Finding 'Miner' 'WARN' ("CPU load is high: {0}% - top consumers: {1}" -f $cpuLoad, $top) `
@@ -296,6 +340,14 @@ if ($guest -and $guest.Enabled) {
 
 $admins = (Get-LocalGroupMember -Group 'Administrators' | ForEach-Object { $_.Name }) -join ', '
 Add-Finding 'Access' 'INFO' ("Administrators group: {0}" -f $admins) ("Grupul Administrators: {0}" -f $admins)
+
+$uac = (Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System').EnableLUA
+if ($uac -eq 0) {
+    Add-Finding 'Access' 'WARN' 'UAC is DISABLED (EnableLUA=0) - malware disables it to elevate silently; re-enable unless you turned it off yourself' `
+        'UAC este DEZACTIVAT (EnableLUA=0) - malware-ul il dezactiveaza pentru a se ridica silentios; reactiveaza-l daca nu l-ai oprit tu' 'EnableLUA=0'
+} else {
+    Add-Finding 'Access' 'OK' 'UAC is enabled' 'UAC este activat'
+}
 
 $rdpDeny = (Get-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server').fDenyTSConnections
 if ($rdpDeny -eq 0) {
@@ -393,6 +445,25 @@ if ($fwOff.Count -gt 0) {
     Add-Finding 'Network' 'OK' 'Firewall enabled on all profiles' 'Firewall activ pe toate profilurile'
 }
 
+# DNS hijack is as common as proxy hijack: malware points DNS at rogue servers
+$dnsServers = @(Get-DnsClientServerAddress -AddressFamily IPv4 |
+    Where-Object { $_.ServerAddresses } |
+    ForEach-Object { $_.ServerAddresses } |
+    Where-Object { $_ -notmatch '^(127\.|0\.0\.0\.0)' } | Sort-Object -Unique)
+if ($dnsServers.Count -gt 0) {
+    Add-Finding 'Network' 'INFO' ("DNS servers in use: {0} - normally your router (192.168.x.x / 10.x.x.x) or a known public resolver (1.1.1.1, 8.8.8.8, 9.9.9.9). An unfamiliar public IP here can redirect every site you visit." -f ($dnsServers -join ', ')) `
+        ("Servere DNS folosite: {0} - normal e routerul tau (192.168.x.x) sau un resolver public cunoscut (1.1.1.1, 8.8.8.8). Un IP public necunoscut aici poate redirectiona orice site vizitezi." -f ($dnsServers -join ', ')) `
+        ($dnsServers -join "`n")
+}
+
+$smb1 = (Get-SmbServerConfiguration).EnableSMB1Protocol
+if ($smb1) {
+    Add-Finding 'Network' 'WARN' 'SMBv1 protocol is ENABLED - obsolete and exploitable (WannaCry vector); disable it unless an ancient device needs it' `
+        'Protocolul SMBv1 este ACTIVAT - invechit si exploatabil (vectorul WannaCry); dezactiveaza-l daca nu il cere un dispozitiv foarte vechi' 'EnableSMB1Protocol=True'
+} else {
+    Add-Finding 'Network' 'OK' 'SMBv1 is disabled' 'SMBv1 este dezactivat'
+}
+
 # =====================================================================
 #  CHECK 7 - CODE TRUST (signatures of running processes & drivers)
 # =====================================================================
@@ -428,6 +499,13 @@ if ($badDrivers.Count -gt 0) {
         'Drivere de kernel fara semnatura valida - serios, driverele ar trebui sa fie toate semnate' ($badDrivers -join "`n")
 } else {
     Add-Finding 'CodeTrust' 'OK' 'All running kernel drivers validly signed' 'Toate driverele de kernel sunt semnate valid'
+}
+
+$machinePolicy = (Get-ItemProperty 'HKLM:\Software\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell').ExecutionPolicy
+if ($machinePolicy -match '^(Bypass|Unrestricted)$') {
+    Add-Finding 'CodeTrust' 'INFO' ("Machine-wide PowerShell execution policy is '{0}' - scripts run without any signing check. Fine if you set it; malware installers also set it." -f $machinePolicy) `
+        ("Politica de executie PowerShell la nivel de sistem este '{0}' - scripturile ruleaza fara verificare. OK daca ai setat-o tu; si instalatoarele de malware o seteaza." -f $machinePolicy) `
+        ("ExecutionPolicy={0}" -f $machinePolicy)
 }
 
 # =====================================================================
@@ -711,6 +789,27 @@ $fixHtml
     Write-Host ""
     Write-Host ("  Report saved / Raport salvat: {0}" -f $reportPath) -ForegroundColor Cyan
     Invoke-Item $reportPath
+}
+
+# =====================================================================
+#  JSON EXPORT - only with -Json (machine-readable, for remote diagnosis)
+# =====================================================================
+if ($Json) {
+    $jsonPath = Join-Path ([Environment]::GetFolderPath('Desktop')) ("PC-HealthCheck_{0}_{1}.json" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyy-MM-dd_HHmm'))
+    $jsonDoc = [pscustomobject]@{
+        Computer  = $env:COMPUTERNAME
+        User      = $env:USERNAME
+        Date      = (Get-Date -Format 'yyyy-MM-dd HH:mm')
+        Mode      = ("scan{0}{1}" -f $(if ($Fix) {'+fix'} else {''}), $(if ($Deep) {'+deep'} else {''}))
+        Verdict   = $verdict
+        VerdictRO = $verdictRO
+        Crit      = $critCount
+        Warn      = $warnCount
+        Findings  = @($script:Findings)
+        Fixes     = @($script:FixLog)
+    }
+    [System.IO.File]::WriteAllText($jsonPath, ($jsonDoc | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host ("  JSON saved / JSON salvat: {0}" -f $jsonPath) -ForegroundColor Cyan
 }
 
 Write-Host ""

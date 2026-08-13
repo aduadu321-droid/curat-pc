@@ -34,6 +34,7 @@ This tool runs the same checks a professional incident responder would run first
 .\Curat-PC.ps1 -Fix       # + safe cleanup (temp, proxy reset, disable Guest)
 .\Curat-PC.ps1 -Deep      # + slow integrity checks (DISM, SFC, Defender scan)
 .\Curat-PC.ps1 -Deep -Fix # everything / totul
+.\Curat-PC.ps1 -Json      # + machine-readable JSON report / + raport JSON
 ```
 
 Works on Windows 10 and 11 with built-in PowerShell 5.1. No dependencies, no internet access needed, nothing uploaded anywhere.
@@ -42,13 +43,13 @@ Works on Windows 10 and 11 with built-in PowerShell 5.1. No dependencies, no int
 
 | Area | Checks |
 |---|---|
-| **Persistence** | Run/RunOnce keys, Startup folders, Winlogon Shell/Userinit, AppInit_DLLs, IFEO debugger hijacks, WMI event subscriptions, non-Microsoft scheduled tasks |
+| **Persistence** | Run/RunOnce keys, Startup folders (flags script files), Winlogon Shell/Userinit, AppInit_DLLs, IFEO debugger hijacks, WMI event subscriptions, non-Microsoft scheduled tasks, unquoted service paths |
 | **Defender tampering** | Tamper Protection, real-time protection, hidden exclusions, threat history |
 | **Ransomware** | Shadow copies & restore points intact, ransom notes, encrypted-file extensions |
-| **Cryptominer** | CPU load, mining-pool connections, full remote-port inventory |
-| **Access** | Guest account, admins, RDP/WinRM, failed & remote logons (7 days), cleared logs |
-| **Network** | WinHTTP/browser proxy hijack, PAC URL, hosts file, firewall |
-| **Code trust** | Authenticode signatures of all running processes and kernel drivers |
+| **Cryptominer** | CPU load (averaged over multiple samples), mining-pool connections, full remote-port inventory |
+| **Access** | Guest account, admins, UAC disabled, RDP/WinRM, failed & remote logons (7 days), cleared logs |
+| **Network** | WinHTTP/browser proxy hijack, PAC URL, hosts file, firewall, DNS servers, SMBv1 |
+| **Code trust** | Authenticode signatures of all running processes and kernel drivers, machine-wide execution policy |
 | **Bundleware** | Aggressive "driver updater / PC optimizer" apps that show fake scary alerts |
 | **Broken downloads** | Detects truncated .exe files that "won't run" (the #1 fake virus symptom) |
 
